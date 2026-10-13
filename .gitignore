@@ -1,1 +1,13 @@
 node_modules/
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+data/yellow_tripdata_*.parquet
+data/yellow_tripdata_*.csv
+data/taxi_zone_lookup.csv
+data/taxi_zones.zip
+data/taxi_zones/
+database/*.db
+database/*.db-*
+database/*.db.*.bak

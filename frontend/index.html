@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sign In - Urban Taxi Mobility Analyst</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #0d1117 0%, #161b22 100%);
+            margin: 0;
+            font-family: 'Inter', sans-serif;
+            color: #c9d1d9;
+        }
+
+        .auth-container {
+            background: rgba(22, 27, 34, 0.85);
+            backdrop-filter: blur(12px);
+            padding: 2.5rem;
+            border-radius: 1rem;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
+            width: 100%;
+            max-width: 420px;
+            border: 1px solid rgba(48, 54, 61, 0.8);
+            box-sizing: border-box;
+        }
+
+        .auth-header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        .auth-header h1 {
+            font-size: 1.75rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(to right, #58a6ff, #a371f7);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .auth-header p {
+            color: #8b949e;
+            font-size: 0.875rem;
+            margin: 0;
+        }
+
+        .form-group {
+            margin-bottom: 1.25rem;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: #c9d1d9;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 0.75rem 1rem;
+            background: rgba(13, 17, 23, 0.75);
+            border: 1px solid rgba(48, 54, 61, 0.8);
+            border-radius: 0.5rem;
+            color: white;
+            font-size: 0.95rem;
+            transition: all 0.2s;
+            box-sizing: border-box;
+            outline: none;
+        }
+
+        .form-group input:focus {
+            border-color: #58a6ff;
+            box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.2);
+        }
+
+        .auth-button {
+            width: 100%;
+            padding: 0.85rem;
+            background: linear-gradient(135deg, #238636 0%, #2ea043 100%);
+            color: white;
+            border: none;
+            border-radius: 0.625rem;
+            font-size: 1rem;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+            cursor: pointer;
+            margin-top: 1rem;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            box-shadow: 0 4px 15px rgba(46, 160, 67, 0.3);
+        }
+
+        .auth-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(46, 160, 67, 0.45);
+        }
+
+        .bypass-btn {
+            display: inline-block;
+            margin-top: 0.75rem;
+            width: 100%;
+            padding: 0.75rem;
+            background: rgba(88, 166, 255, 0.1);
+            color: #58a6ff;
+            border: 1px solid rgba(88, 166, 255, 0.3);
+            border-radius: 0.625rem;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: none;
+            text-align: center;
+            box-sizing: border-box;
+            transition: all 0.2s ease;
+        }
+
+        .bypass-btn:hover {
+            background: rgba(88, 166, 255, 0.2);
+            color: #79c0ff;
+        }
+
+        .signup-link-btn {
+            display: inline-block;
+            margin-top: 0.5rem;
+            color: #8b949e;
+            font-size: 0.875rem;
+            text-decoration: none;
+            transition: color 0.2s;
+        }
+
+        .signup-link-btn:hover {
+            color: #58a6ff;
+        }
+
+        .error-message {
+            background: rgba(248, 81, 73, 0.12);
+            border: 1px solid rgba(248, 81, 73, 0.4);
+            color: #ff7b72;
+            padding: 0.75rem;
+            border-radius: 0.5rem;
+            font-size: 0.875rem;
+            margin-bottom: 1.25rem;
+            display: none;
+        }
+
+        .auth-footer {
+            margin-top: 1.5rem;
+            text-align: center;
+            font-size: 0.875rem;
+            color: #8b949e;
+        }
+    </style>
+</head>
+<body>
+    <div class="auth-container">
+        <div class="auth-header">
+            <h1>Urban Taxi Analyst</h1>
+            <p>NYC Mobility Intelligence & Diagnostics</p>
+        </div>
+        <div id="error-message" class="error-message"></div>
+        <form id="login-form">
+            <div class="form-group">
+                <label for="email">Email Address</label>
+                <input type="email" id="email" placeholder="analyst@domain.com" required>
+            </div>
+            <div class="form-group">
+                <label for="password">Password</label>
+                <input type="password" id="password" placeholder="••••••••" required>
+            </div>
+            <button type="submit" class="auth-button">Sign In</button>
+            <a href="dashboard.html" class="bypass-btn">Enter Dashboard Directly (Demo Mode)</a>
+        </form>
+        <div class="auth-footer">
+            Don't have an analyst account?<br>
+            <a href="signup.html" class="signup-link-btn">Create an Account &rarr;</a>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('login-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            const errorElement = document.getElementById('error-message');
+
+            try {
+                const response = await fetch('http://127.0.0.1:5000/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    localStorage.setItem('auth_token', data.token);
+                    localStorage.setItem('user_email', data.email || email);
+                    window.location.href = 'dashboard.html';
+                } else {
+                    errorElement.textContent = data.error || 'Authentication failed';
+                    errorElement.style.display = 'block';
+                }
+            } catch (error) {
+                // In local/demo mode allow entry with entered credentials
+                console.warn('Backend login endpoint unavailable, launching in analyst session mode.');
+                localStorage.setItem('user_email', email);
+                window.location.href = 'dashboard.html';
+            }
+        });
+    </script>
+</body>
+</html>

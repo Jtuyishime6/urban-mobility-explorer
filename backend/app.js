@@ -1,4 +1,5 @@
 const express = require('express');
+const { findOptimalCorridor } = require('./algorithms');
 
 const NEW_YORK = 'America/New_York';
 const LOCAL_PARTS_FORMATTER = new Intl.DateTimeFormat('en-US', {
@@ -94,6 +95,20 @@ function parseNumber(value, name, min, max) {
         throw new HttpError(400, `${name} must be between ${min} and ${max}`);
     }
     return number;
+}
+
+function parsePositiveInt(value, name) {
+    const number = Number(value);
+    if (!Number.isSafeInteger(number) || number <= 0) {
+        throw new HttpError(400, `${name} must be a positive integer`);
+    }
+    return number;
+}
+
+function requireExistingZone(db, zoneId, name) {
+    if (!db.prepare('SELECT 1 FROM taxi_zones WHERE location_id = ?').get(zoneId)) {
+        throw new HttpError(404, `Taxi zone ${zoneId} (${name}) was not found`);
+    }
 }
 
 function buildFilters(db, query, { includeScope = true } = {}) {
@@ -572,6 +587,32 @@ function createApp(db) {
 
     app.get('/api/trips/gaps', (req, res) => {
         res.json(getCoverageGaps(db, buildFilters(db, req.query, { includeScope: false })));
+    });
+
+    /**
+     * Custom DSA endpoint: binary-heap Dijkstra on the zone mobility graph.
+     * Query: from, to (required zone IDs); optional start_date, end_date, borough, min_trips.
+     */
+    app.get('/api/routes/optimal', (req, res) => {
+        const fromRaw = scalarQueryValue(req.query.from, 'from');
+        const toRaw = scalarQueryValue(req.query.to, 'to');
+        if (fromRaw === undefined || toRaw === undefined) {
+            throw new HttpError(400, 'from and to zone ids are required');
+        }
+        const fromZoneId = parsePositiveInt(fromRaw, 'from');
+        const toZoneId = parsePositiveInt(toRaw, 'to');
+        requireExistingZone(db, fromZoneId, 'from');
+        requireExistingZone(db, toZoneId, 'to');
+
+        const minTrips = parseNumber(
+            scalarQueryValue(req.query.min_trips, 'min_trips'),
+            'min_trips',
+            1,
+            1_000_000
+        ) ?? 1;
+
+        const filters = buildFilters(db, req.query, { includeScope: false });
+        res.json(findOptimalCorridor(db, filters, fromZoneId, toZoneId, { minTrips }));
     });
 
     app.get('/api/zones/:zoneId/stats', (req, res) => {

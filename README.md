@@ -89,6 +89,7 @@ All routes are read-only JSON endpoints under `/api`:
 | `GET /trips/revenue` | Average mobility speed by pickup borough (used by the congestion chart) |
 | `GET /trips/fare-distance` | Trip counts and average fares across distance buckets |
 | `GET /trips/gaps` | Pickup/drop-off imbalances for underserved zones |
+| `GET /routes/optimal` | Custom Dijkstra corridor between two zones (binary min-heap) |
 | `GET /zones/:zoneId/stats` | Pickup/drop-off and speed comparison metrics for one zone |
 | `GET /boroughs/:borough/stats` | Zone count and mobility metrics for one borough |
 | `GET /report` | Combined summary, top zones, rush-hour trend, and coverage gaps |
@@ -100,3 +101,30 @@ boundaries follow the New York calendar (including daylight-saving changes).
 and `sort_order` (`asc` or `desc`). The fare-versus-distance dashboard chart
 uses the API when available and retains its existing fallback for offline
 development.
+
+## Issue 3: Custom algorithm (Dijkstra mobility corridor)
+
+The API includes a **manual** graph algorithm (not library shortest-path helpers):
+
+1. Aggregate cleaned trips into a directed **zone → zone** graph.
+2. Weight each edge by average trip duration (seconds).
+3. Run **Dijkstra** with a custom **binary min-heap** (decrease-key) to find the
+   lowest expected-travel-time corridor between two taxi zones.
+
+Documentation with pseudo-code and Big-O analysis lives in
+[`backend/algorithms/ALGORITHM.md`](backend/algorithms/ALGORITHM.md).
+
+Example (API must be running; replace zone IDs with real TLC location IDs):
+
+```sh
+curl "http://127.0.0.1:5000/api/routes/optimal?from=161&to=237&start_date=2019-01-01&end_date=2019-01-07"
+```
+
+Required query params: `from`, `to`. Optional: `start_date`, `end_date`,
+`borough`, `min_trips` (minimum observed trips for an edge to be included).
+
+Run algorithm unit tests (no full Parquet download required):
+
+```sh
+npm --prefix backend test
+```

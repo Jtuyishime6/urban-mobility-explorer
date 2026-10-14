@@ -25,7 +25,8 @@ before(async () => {
             (location_id, borough_id, zone_name, service_zone_id, geometry_json)
         VALUES
             (1, 1, 'Zone A', 1, '{"type":"Polygon","coordinates":[]}'),
-            (2, 2, 'Zone B', 1, '{"type":"Polygon","coordinates":[]}');
+            (2, 2, 'Zone B', 1, '{"type":"Polygon","coordinates":[]}'),
+            (3, 1, 'Zone C', 1, '{"type":"Polygon","coordinates":[]}');
         INSERT INTO rate_codes (rate_code_id, rate_code_name) VALUES (1, 'Standard rate');
         INSERT INTO payment_types (payment_type_id, payment_type_name) VALUES (1, 'Credit card');
     `);
@@ -56,6 +57,15 @@ before(async () => {
         'trip-3', '2019-01-02T01:00:00+00:00', '2019-01-02T01:15:00+00:00',
         1, 4, 2, 2, 16, 18, 900, 16, 4
     );
+    // Corridor edges for Dijkstra: A→C (300s) then C→B (300s) beats direct A→B (900s).
+    insertTrip.run(
+        'trip-4', '2019-01-01T12:00:00+00:00', '2019-01-01T12:05:00+00:00',
+        1, 1, 1, 3, 8, 10, 300, 12, 8
+    );
+    insertTrip.run(
+        'trip-5', '2019-01-01T13:00:00+00:00', '2019-01-01T13:05:00+00:00',
+        1, 1, 3, 2, 8, 10, 300, 12, 8
+    );
 
     server = createApp(database).listen(0, '127.0.0.1');
     await new Promise(resolve => server.once('listening', resolve));
@@ -85,7 +95,7 @@ test('serves taxi zone GeoJSON in the dashboard shape', async () => {
     const response = await fetch(`${baseUrl}/api/zones`);
     assert.equal(response.status, 200);
     const zones = await response.json();
-    assert.equal(zones.length, 2);
+    assert.equal(zones.length, 3);
     assert.deepEqual(zones[0], {
         id: 2,
         borough: 'Brooklyn',
@@ -100,9 +110,9 @@ test('filters summary by New York calendar date and returns aggregate metrics', 
     );
     assert.equal(response.status, 200);
     const summary = await response.json();
-    assert.equal(summary.totalTrips, 3);
-    assert.equal(summary.totalPassengers, 4);
-    assert.equal(summary.totalRevenue, 185);
+    assert.equal(summary.totalTrips, 5);
+    assert.equal(summary.totalPassengers, 6);
+    assert.equal(summary.totalRevenue, 205);
     assert.equal(summary.anomalyDetails.fare, 1);
     assert.equal(summary.totalAnomalies, 1);
     assert.equal(summary.topZones[0].zone, 'Zone A');
@@ -115,9 +125,9 @@ test('applies distance and fare limits and validates sort selections', async () 
     );
     const summary = await response.json();
     assert.equal(response.status, 200);
-    assert.equal(summary.totalTrips, 2);
-    assert.equal(summary.totalRevenue, 33);
-    assert.deepEqual(summary.topZones.map(zone => zone.zone), ['Zone A', 'Zone B']);
+    assert.equal(summary.totalTrips, 4);
+    assert.equal(summary.totalRevenue, 53);
+    assert.deepEqual(summary.topZones.map(zone => zone.zone), ['Zone C', 'Zone A', 'Zone B']);
 });
 
 test('returns 24 local-time hourly buckets and fare-distance groups', async () => {
@@ -129,8 +139,8 @@ test('returns 24 local-time hourly buckets and fare-distance groups', async () =
     const fareResponse = await fetch(`${baseUrl}/api/trips/fare-distance?start_date=2019-01-01`);
     const fareGroups = await fareResponse.json();
     assert.equal(fareGroups.length, 6);
-    assert.equal(fareGroups[0].trips, 1);
-    assert.equal(fareGroups[0].avgFare, 150);
+    assert.equal(fareGroups[0].trips, 3);
+    assert.equal(fareGroups[0].avgFare, 55.33);
 });
 
 test('rejects invalid filters and unknown zones with JSON errors', async () => {
@@ -149,14 +159,14 @@ test('rejects invalid filters and unknown zones with JSON errors', async () => {
 test('returns zone and borough summaries and coverage gaps', async () => {
     const zoneResponse = await fetch(`${baseUrl}/api/zones/1/stats?start_date=2019-01-01`);
     const zoneStats = await zoneResponse.json();
-    assert.equal(zoneStats.pickupCount, 2);
+    assert.equal(zoneStats.pickupCount, 3);
     assert.equal(zoneStats.dropoffCount, 1);
-    assert.equal(zoneStats.coverageRatio, 0.5);
+    assert.equal(zoneStats.coverageRatio, 0.33);
 
     const boroughResponse = await fetch(`${baseUrl}/api/boroughs/Manhattan/stats`);
     const boroughStats = await boroughResponse.json();
-    assert.equal(boroughStats.zoneCount, 1);
-    assert.equal(boroughStats.totalTrips, 2);
+    assert.equal(boroughStats.zoneCount, 2);
+    assert.equal(boroughStats.totalTrips, 4);
 
     const gapsResponse = await fetch(`${baseUrl}/api/trips/gaps?start_date=2019-01-01`);
     const gaps = await gapsResponse.json();
@@ -167,7 +177,9 @@ test('returns zone and borough summaries and coverage gaps', async () => {
 test('returns average borough speed in the congestion chart response shape', async () => {
     const response = await fetch(`${baseUrl}/api/trips/revenue`);
     assert.equal(response.status, 200);
-    assert.deepEqual(await response.json(), { Brooklyn: 16, Manhattan: 10 });
+    const speeds = await response.json();
+    assert.equal(speeds.Brooklyn, 16);
+    assert.equal(speeds.Manhattan, 11);
 });
 
 test('builds a report with top zones and hourly rush-hour data', async () => {
@@ -175,7 +187,28 @@ test('builds a report with top zones and hourly rush-hour data', async () => {
     const report = await response.json();
     assert.equal(response.status, 200);
     assert.equal(report.metadata.scope, 'Citywide');
-    assert.equal(report.summary.totalTrips, 3);
-    assert.equal(report.topZones.length, 2);
+    assert.equal(report.summary.totalTrips, 5);
+    assert.equal(report.topZones.length, 3);
     assert.equal(Object.keys(report.rushHour.trend).length, 24);
+});
+
+test('runs custom Dijkstra corridor search between taxi zones', async () => {
+    const response = await fetch(
+        `${baseUrl}/api/routes/optimal?from=1&to=2&start_date=2019-01-01&end_date=2019-01-01`
+    );
+    assert.equal(response.status, 200);
+    const route = await response.json();
+    assert.equal(route.algorithm, 'dijkstra');
+    assert.equal(route.dataStructure, 'binary_min_heap');
+    assert.equal(route.found, true);
+    assert.deepEqual(route.path.map(zone => zone.id), [1, 3, 2]);
+    assert.equal(route.hops, 2);
+    assert.equal(route.totalDurationSeconds, 600);
+    assert.equal(route.complexity.time, 'O((V + E) log V)');
+
+    const missing = await fetch(`${baseUrl}/api/routes/optimal?from=1`);
+    assert.equal(missing.status, 400);
+
+    const unknown = await fetch(`${baseUrl}/api/routes/optimal?from=1&to=999`);
+    assert.equal(unknown.status, 404);
 });

@@ -62,3 +62,41 @@ Shapefile boundaries are transformed from their declared source projection
 into WGS84 before storage.
 The trip table also stores derived `duration_seconds`, `average_speed_mph`, and
 `fare_per_mile` metrics.
+
+## Issue 2: Backend API
+
+After the ETL has created `data/urban_mobility.sqlite`, start the read-only
+Express API from the repository root:
+
+```sh
+npm --prefix backend install
+npm --prefix backend start
+```
+
+The server listens on `http://127.0.0.1:5000` by default. Set `PORT`, `HOST`,
+or `DATABASE_PATH` to override the defaults. Startup fails with an explicit
+message if the cleaned database is missing; build it using the Issue 1 command
+above first.
+
+All routes are read-only JSON endpoints under `/api`:
+
+| Route | Response |
+| --- | --- |
+| `GET /health` | API/database status |
+| `GET /zones` | Taxi zone identifiers, boroughs, names, and GeoJSON geometry |
+| `GET /trips/summary` | Filtered trip/passenger/revenue/speed metrics, anomaly counts, and sorted top zones |
+| `GET /trips/hourly` | Trip volume and average speed for each New York local hour |
+| `GET /trips/revenue` | Average mobility speed by pickup borough (used by the congestion chart) |
+| `GET /trips/fare-distance` | Trip counts and average fares across distance buckets |
+| `GET /trips/gaps` | Pickup/drop-off imbalances for underserved zones |
+| `GET /zones/:zoneId/stats` | Pickup/drop-off and speed comparison metrics for one zone |
+| `GET /boroughs/:borough/stats` | Zone count and mobility metrics for one borough |
+| `GET /report` | Combined summary, top zones, rush-hour trend, and coverage gaps |
+
+Analytics routes accept `start_date` and `end_date` as `YYYY-MM-DD`; date
+boundaries follow the New York calendar (including daylight-saving changes).
+`borough` and `zone_id` narrow the analysis, while summary also accepts
+`max_distance`, `max_fare`, `sort_by` (`volume`, `speed`, `distance`, `fare`),
+and `sort_order` (`asc` or `desc`). The fare-versus-distance dashboard chart
+uses the API when available and retains its existing fallback for offline
+development.

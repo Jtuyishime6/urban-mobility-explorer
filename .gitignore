@@ -1,1 +1,13 @@
 node_modules/
+.venv/
+__pycache__/
+*.py[cod]
+temp_auto_push.bat
+data/raw/
+data/processed/
+data/*.sqlite
+data/*.sqlite3
+data/*.db
+.gitignore
+branch_structure.json
+config.bat

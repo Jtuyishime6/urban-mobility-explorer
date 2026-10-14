@@ -229,8 +229,16 @@ main {
 
 .tab-content {
     padding: 1rem;
-    height: calc(100% - 3.5rem);
+    height: 480px;
+    max-height: 480px;
     position: relative;
+    box-sizing: border-box;
+    overflow: hidden;
+}
+
+#mainChart {
+    max-height: 440px !important;
+    width: 100% !important;
 }
 
 .loading-overlay {
@@ -442,18 +450,27 @@ select {
 
 .dashboard-grid {
     display: grid;
-    grid-template-columns: 2fr 1fr;
-    gap: 2rem;
+    grid-template-columns: 1.5fr 1.5fr;
+    gap: 1.5rem;
+    align-items: start;
 }
 
 .card {
     background-color: var(--card-bg);
     border: 1px solid var(--border-color);
     border-radius: 12px;
-    padding: 1.5rem;
+    padding: 1.25rem;
     transition: transform 0.2s ease, border-color 0.2s ease;
     overflow: hidden;
     position: relative;
+    box-sizing: border-box;
+}
+
+.map-card, .chart-card {
+    height: 560px;
+    max-height: 560px;
+    display: flex;
+    flex-direction: column;
 }
 
 .card:hover {
@@ -462,8 +479,9 @@ select {
 }
 
 #map {
-    height: 500px;
+    height: 480px;
     border-radius: 6px;
+    width: 100%;
 }
 
 .btn-primary {

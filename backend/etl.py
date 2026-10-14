@@ -368,6 +368,7 @@ def load_trips(
     parquet_path: Path,
     valid_zone_ids: set[int],
     batch_size: int = 5000,
+    max_trips: int | None = None,
 ) -> tuple[int, int]:
     try:
         import pyarrow.parquet as parquet
@@ -383,8 +384,14 @@ def load_trips(
     accepted = rejected = source_row_number = 0
     flag_counts: dict[str, int] = {}
     source_file = parquet_path.name
+    reached_limit = False
     for batch in parquet_file.iter_batches(batch_size=batch_size):
+        if reached_limit:
+            break
         for record in batch.to_pylist():
+            if max_trips is not None and accepted >= max_trips:
+                reached_limit = True
+                break
             source_row_number += 1
             try:
                 trip, flags = clean_record(record, valid_zone_ids)
@@ -478,10 +485,18 @@ def main() -> None:
         default=PROJECT_ROOT / "data" / "urban_mobility.sqlite",
         help="SQLite database output path",
     )
+    parser.add_argument(
+        "--max-trips",
+        type=int,
+        default=None,
+        help="Stop after accepting this many trips (useful for lightweight demos)",
+    )
     args = parser.parse_args()
     for input_path in (args.trips, args.zone_lookup, args.zones):
         if not input_path.is_file():
             parser.error(f"input file does not exist: {input_path}")
+    if args.max_trips is not None and args.max_trips < 1:
+        parser.error("--max-trips must be at least 1")
 
     args.database.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(args.database) as connection:
@@ -489,7 +504,12 @@ def main() -> None:
         connection.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
         _seed_dimensions(connection)
         valid_zone_ids = load_zones(connection, args.zone_lookup, args.zones)
-        accepted, rejected = load_trips(connection, args.trips, valid_zone_ids)
+        accepted, rejected = load_trips(
+            connection,
+            args.trips,
+            valid_zone_ids,
+            max_trips=args.max_trips,
+        )
         connection.commit()
     print(f"Loaded {accepted:,} trips; excluded {rejected:,} records. Database: {args.database}")
 

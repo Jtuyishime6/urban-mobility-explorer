@@ -1,3 +1,4 @@
+const path = require('node:path');
 const express = require('express');
 const { findOptimalCorridor } = require('./algorithms');
 
@@ -689,6 +690,15 @@ function createApp(db) {
                 ratio: gap.coverageRatio
             }))
         });
+    });
+
+    const frontendDir = path.resolve(__dirname, '..', 'frontend');
+    app.use(express.static(frontendDir));
+    app.get('/', (_req, res) => {
+        res.sendFile(path.join(frontendDir, 'index.html'));
+    });
+    app.get('/dashboard', (_req, res) => {
+        res.sendFile(path.join(frontendDir, 'dashboard.html'));
     });
 
     app.use('/api', (_req, res) => {

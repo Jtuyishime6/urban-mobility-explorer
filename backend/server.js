@@ -3,9 +3,13 @@ const path = require('node:path');
 const Database = require('better-sqlite3');
 const { createApp } = require('./app');
 
-const databasePath = path.resolve(
-    process.env.DATABASE_PATH || path.join(__dirname, '..', 'data', 'urban_mobility.sqlite')
-);
+const projectRoot = path.join(__dirname, '..');
+const configuredDatabase = process.env.DATABASE_PATH
+    || path.join(projectRoot, 'data', 'urban_mobility.sqlite');
+// Resolve relative DATABASE_PATH from the repo root (npm --prefix backend changes cwd).
+const databasePath = path.isAbsolute(configuredDatabase)
+    ? configuredDatabase
+    : path.resolve(projectRoot, configuredDatabase);
 const port = Number(process.env.PORT || 5000);
 const host = process.env.HOST || '127.0.0.1';
 

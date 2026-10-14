@@ -5,8 +5,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // Create map centered on NYC
     const map = L.map('map').setView([40.7128, -74.0060], 11);
     
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-        attribution: '&copy; OpenStreetMap &copy; CARTO'
+    // Dark Gray basemap - 100% free, no API key, no watermark
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+        attribution: '&copy; Esri &mdash; Esri, DeLorme, NAVTEQ',
+        maxZoom: 16
     }).addTo(map);
 
     const startDateInput = document.getElementById('startDate');

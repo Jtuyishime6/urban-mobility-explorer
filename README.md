@@ -1,36 +1,110 @@
 # Urban Mobility Data Explorer
 
+Interactive explorer for **NYC TLC Yellow Taxi** trips (January 2019): clean the data into SQLite, serve analytics through a read-only Express API, and visualize hotspots, rush hour, coverage gaps, and optimal mobility corridors in a browser dashboard.
+
 ## 📌 Deliverables & Project Links
 
 - **Team Participation Sheet:** [Urban Mobility Analytics - Team Sheet](https://docs.google.com/spreadsheets/d/170hJX_mlW1NxFpZ7_HElOrk321vrqa3xFlHXSUc20IA/edit?usp=sharing)
-- **Video Walkthrough (5-Minute Demo):** _[Insert Video Link Here]_
+- **Video Walkthrough (5-Minute Demo):** [https://youtu.be/V09Ui8sU7YY](https://youtu.be/V09Ui8sU7YY)
 - **Database Schema:** [`database/schema.sql`](database/schema.sql)
 - **Algorithm Analysis:** [`backend/algorithms/ALGORITHM.md`](backend/algorithms/ALGORITHM.md)
 - **CodeVibe Integrity Reports:** [`codevibe-reports/`](codevibe-reports/)
 
-## Issue 1: Data cleaning and database setup
+This README is meant to be **fully runnable** on its own: prerequisites, install, environment, data load, and how to start **both** the backend and the frontend.
 
-The Issue 1 pipeline loads a NYC TLC Yellow Taxi Parquet file together with the
-taxi zone lookup CSV and spatial boundaries into a normalized SQLite database.
-Download the [January 2019 Yellow Taxi Parquet](https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2019-01.parquet),
-[taxi zone lookup CSV](https://d37ci6vzurychx.cloudfront.net/misc/taxi_zone_lookup.csv),
-and [taxi zone boundary ZIP](https://d37ci6vzurychx.cloudfront.net/misc/taxi_zones.zip)
-and place them in `data/raw/`. The boundary loader accepts the provided
-`taxi_zones.zip` shapefile or a WGS84 GeoJSON file. Raw datasets and generated
-databases are intentionally excluded from Git.
+## Demo video
 
-### Setup and run
+Project walkthrough (UI, architecture, custom algorithm, and technical report):
 
-From the repository root, create an isolated environment and install the
-ETL dependencies:
+[https://youtu.be/V09Ui8sU7YY](https://youtu.be/V09Ui8sU7YY)
+
+---
+
+## Prerequisites
+
+| Tool | Version | Why |
+| --- | --- | --- |
+| Python | 3.10+ recommended | ETL / demo DB scripts |
+| Node.js | **≥ 20** | Express API (`better-sqlite3`) |
+| npm | comes with Node | Backend dependencies |
+| Disk | ~4 GB free for full load | Parquet + full SQLite (~3 GB) |
+
+Optional: a modern browser (Chrome/Firefox/Safari) for the dashboard.
+
+---
+
+## Quick start (demo database)
+
+If a teammate already produced `data/urban_mobility_demo.sqlite` (or you create it below), you can skip the full Parquet download.
+
+**Terminal 1 — backend**
 
 ```sh
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r backend/requirements.txt
+cd /path/to/urban-mobility-explorer
+npm --prefix backend install
+DATABASE_PATH=data/urban_mobility_demo.sqlite npm --prefix backend start
 ```
 
-Then run the loader, using the actual filenames you downloaded:
+API: `http://127.0.0.1:5000` · health check: `http://127.0.0.1:5000/api/health`
+
+**Terminal 2 — frontend**
+
+```sh
+cd /path/to/urban-mobility-explorer/frontend
+python3 -m http.server 8000
+```
+
+Open: [http://127.0.0.1:8000/dashboard.html](http://127.0.0.1:8000/dashboard.html)
+
+The dashboard calls the API at `http://127.0.0.1:5000/api` (CORS is enabled for GET). Keep both processes running.
+
+---
+
+## 1. Clone and install
+
+From the repository root:
+
+```sh
+# Python environment (ETL)
+python3 -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+python -m pip install -r backend/requirements.txt
+
+# Node API
+npm --prefix backend install
+```
+
+---
+
+## 2. Environment setup
+
+No `.env` file is required. The API reads optional environment variables:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `DATABASE_PATH` | `data/urban_mobility.sqlite` | Path to the cleaned SQLite DB (relative paths resolve from the **repo root**) |
+| `PORT` | `5000` | API listen port |
+| `HOST` | `127.0.0.1` | API bind address |
+
+Examples:
+
+```sh
+PORT=5000 HOST=127.0.0.1 DATABASE_PATH=data/urban_mobility_demo.sqlite npm --prefix backend start
+```
+
+The frontend API base URL is set in `frontend/js/api.js` (`http://127.0.0.1:5000/api`). Change that constant if you alter `HOST`/`PORT`.
+
+---
+
+## 3. Data: download and ETL (Issue 1)
+
+Raw datasets are **not** in Git. Download and place them in `data/raw/`:
+
+1. [January 2019 Yellow Taxi Parquet](https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2019-01.parquet)
+2. [Taxi zone lookup CSV](https://d37ci6vzurychx.cloudfront.net/misc/taxi_zone_lookup.csv)
+3. [Taxi zone boundaries ZIP](https://d37ci6vzurychx.cloudfront.net/misc/taxi_zones.zip)
+
+Then load (from repo root, venv activated):
 
 ```sh
 python backend/etl.py \
@@ -39,100 +113,155 @@ python backend/etl.py \
   --zones data/raw/taxi_zones.zip
 ```
 
-The default output is `data/urban_mobility.sqlite`. Override it with
-`--database /path/to/output.sqlite` if needed. Run
-`python -m unittest discover -s backend/tests -v` to test the cleaning rules
-and schema without downloading the full dataset.
+Default output: `data/urban_mobility.sqlite`. Override with `--database /path/to/output.sqlite`.
 
-### Cleaning rules and audit trail
+**Cleaning rules (summary):** New York local timestamps → UTC; reject invalid duration, passenger, distance, speed, fare, total, or unknown zones; impute missing optional fees; fingerprint exact duplicates; write exclusions/flags to `data_quality_issues`. Schema: `database/schema.sql`.
 
-- Naive TLC timestamps are interpreted as New York local time and stored in UTC.
-- Trips are excluded when timestamps are invalid, duration is nonpositive or
-  exceeds four hours, passenger count is outside 1–8, distance is outside
-  `(0, 200]` miles, average speed exceeds 100 mph, fare is outside `(0, 1000]`,
-  total is outside `(0, 1500]`, or either location is absent from the zone table.
-- Missing optional tax/fee components are set to zero; a missing total is
-  calculated from the fare and available components. Invalid optional category
-  IDs are stored as `NULL`. These accepted-but-adjusted rows are flagged. A
-  field absent from an older source file is treated as not reported, not as a
-  per-row error.
-- Exact duplicate source rows are detected by a SHA-256 fingerprint. Every
-  excluded row is recorded in `data_quality_issues`, including the source
-  filename, one-based row number, reason, and a compact summary of relevant
-  source fields as JSON. Accepted-row imputations are summarized per reason
-  (using source row `0`) so routine missing optional fees do not create
-  millions of repetitive audit records.
-
-The relational schema separates boroughs, service zones, taxi zones, rate
-codes, and payment types from the trip fact table. It includes zone geometry,
-foreign-key constraints, and indexes for date- and location-based trip queries.
-Shapefile boundaries are transformed from their declared source projection
-into WGS84 before storage.
-The trip table also stores derived `duration_seconds`, `average_speed_mph`, and
-`fare_per_mile` metrics.
-
-## Issue 2: Backend API
-
-After the ETL has created `data/urban_mobility.sqlite`, start the read-only
-Express API from the repository root:
+ETL unit tests (no full Parquet required):
 
 ```sh
-npm --prefix backend install
-npm --prefix backend start
+python -m unittest discover -s backend/tests -v
 ```
 
-The server listens on `http://127.0.0.1:5000` by default. Set `PORT`, `HOST`,
-or `DATABASE_PATH` to override the defaults. Startup fails with an explicit
-message if the cleaned database is missing; build it using the Issue 1 command
-above first.
+### Lightweight demo database
 
-All routes are read-only JSON endpoints under `/api`:
+Full January load is ~7.5M trips and several GB. For a laptop demo:
+
+```sh
+source .venv/bin/activate
+python backend/create_demo_db.py
+# → data/urban_mobility_demo.sqlite (~80k trips, all zones kept)
+```
+
+Or rebuild a capped DB directly from Parquet:
+
+```sh
+python backend/etl.py \
+  --trips data/raw/yellow_tripdata_2019-01.parquet \
+  --zone-lookup data/raw/taxi_zone_lookup.csv \
+  --zones data/raw/taxi_zones.zip \
+  --database data/urban_mobility_demo.sqlite \
+  --max-trips 80000
+```
+
+---
+
+## 4. Launch the backend (Issue 2)
+
+```sh
+# Full database (default path)
+npm --prefix backend start
+
+# Or demo database
+DATABASE_PATH=data/urban_mobility_demo.sqlite npm --prefix backend start
+```
+
+Startup fails with a clear message if the SQLite file is missing—run the ETL (or demo script) first.
+
+### API routes (read-only JSON under `/api`)
 
 | Route | Response |
 | --- | --- |
-| `GET /health` | API/database status |
-| `GET /zones` | Taxi zone identifiers, boroughs, names, and GeoJSON geometry |
-| `GET /trips/summary` | Filtered trip/passenger/revenue/speed metrics, anomaly counts, and sorted top zones |
-| `GET /trips/hourly` | Trip volume and average speed for each New York local hour |
-| `GET /trips/revenue` | Average mobility speed by pickup borough (used by the congestion chart) |
-| `GET /trips/fare-distance` | Trip counts and average fares across distance buckets |
-| `GET /trips/gaps` | Pickup/drop-off imbalances for underserved zones |
-| `GET /routes/optimal` | Custom Dijkstra corridor between two zones (binary min-heap) |
-| `GET /zones/:zoneId/stats` | Pickup/drop-off and speed comparison metrics for one zone |
-| `GET /boroughs/:borough/stats` | Zone count and mobility metrics for one borough |
-| `GET /report` | Combined summary, top zones, rush-hour trend, and coverage gaps |
+| `GET /api/health` | API / database status |
+| `GET /api/zones` | Zone IDs, boroughs, names, GeoJSON |
+| `GET /api/trips/summary` | KPIs, anomaly counts, top zones |
+| `GET /api/trips/hourly` | Volume and speed by New York local hour |
+| `GET /api/trips/revenue` | Average mobility speed by pickup borough |
+| `GET /api/trips/fare-distance` | Counts / avg fares by distance bucket |
+| `GET /api/trips/gaps` | Pickup / drop-off imbalances |
+| `GET /api/routes/optimal` | Custom Dijkstra corridor between two zones |
+| `GET /api/zones/:zoneId/stats` | Per-zone comparison metrics |
+| `GET /api/boroughs/:borough/stats` | Per-borough metrics |
+| `GET /api/report` | Combined summary for the report modal |
 
-Analytics routes accept `start_date` and `end_date` as `YYYY-MM-DD`; date
-boundaries follow the New York calendar (including daylight-saving changes).
-`borough` and `zone_id` narrow the analysis, while summary also accepts
-`max_distance`, `max_fare`, `sort_by` (`volume`, `speed`, `distance`, `fare`),
-and `sort_order` (`asc` or `desc`). The fare-versus-distance dashboard chart
-uses the API when available and retains its existing fallback for offline
-development.
+Common query params: `start_date`, `end_date` (`YYYY-MM-DD`, New York calendar), `borough`, `zone_id`. Summary also accepts `max_distance`, `max_fare`, `sort_by` (`volume` \| `speed` \| `distance` \| `fare`), `sort_order` (`asc` \| `desc`).
+
+Backend tests:
+
+```sh
+npm --prefix backend test
+```
+
+---
+
+## 5. Launch the frontend
+
+The UI is static HTML/CSS/JS (no bundler). From a **second terminal**:
+
+```sh
+cd frontend
+python3 -m http.server 8000
+```
+
+Then open:
+
+- Landing / auth-style entry: [http://127.0.0.1:8000/index.html](http://127.0.0.1:8000/index.html)
+- Main dashboard: [http://127.0.0.1:8000/dashboard.html](http://127.0.0.1:8000/dashboard.html)
+
+Alternative static servers (any one is fine):
+
+```sh
+npx --yes serve -l 8000 frontend
+# or
+npx --yes http-server frontend -p 8000 -c-1
+```
+
+**Do not** open `dashboard.html` via `file://` if the browser blocks cross-origin requests to the API; use the local HTTP server above.
+
+---
 
 ## Issue 3: Custom algorithm (Dijkstra mobility corridor)
 
-The API includes a **manual** graph algorithm (not library shortest-path helpers):
+Manual graph algorithm (not library shortest-path helpers):
 
 1. Aggregate cleaned trips into a directed **zone → zone** graph.
 2. Weight each edge by average trip duration (seconds).
-3. Run **Dijkstra** with a custom **binary min-heap** (decrease-key) to find the
-   lowest expected-travel-time corridor between two taxi zones.
+3. Run **Dijkstra** with a custom **binary min-heap** (decrease-key).
 
-Documentation with pseudo-code and Big-O analysis lives in
-[`backend/algorithms/ALGORITHM.md`](backend/algorithms/ALGORITHM.md).
-
-Example (API must be running; replace zone IDs with real TLC location IDs):
+Docs (pseudo-code + Big-O): [`backend/algorithms/ALGORITHM.md`](backend/algorithms/ALGORITHM.md).
 
 ```sh
 curl "http://127.0.0.1:5000/api/routes/optimal?from=161&to=237&start_date=2019-01-01&end_date=2019-01-07"
 ```
 
-Required query params: `from`, `to`. Optional: `start_date`, `end_date`,
-`borough`, `min_trips` (minimum observed trips for an edge to be included).
+Required: `from`, `to`. Optional: `start_date`, `end_date`, `borough`, `min_trips`.
 
-Run algorithm unit tests (no full Parquet download required):
+---
 
-```sh
-npm --prefix backend test
+## Project layout
+
 ```
+urban-mobility-explorer/
+├── README.md
+├── docs/technical-report.pdf   # Course documentation (2–3 pages)
+├── backend/
+│   ├── etl.py                  # Clean + load Parquet → SQLite
+│   ├── create_demo_db.py       # Sample DB for demos
+│   ├── server.js / app.js      # Express API
+│   ├── algorithms/             # Binary heap + Dijkstra
+│   └── requirements.txt / package.json
+├── frontend/                   # Static dashboard (Leaflet + Chart.js)
+├── database/schema.sql
+└── data/                       # raw/ + sqlite (gitignored content)
+```
+
+---
+
+## Troubleshooting
+
+| Symptom | Fix |
+| --- | --- |
+| `SQLite database not found` | Run `etl.py` or `create_demo_db.py`; set `DATABASE_PATH` correctly from repo root |
+| Dashboard KPIs stay empty / network errors | Confirm API is up (`/api/health`) and frontend uses port `5000` |
+| CORS / blocked fetch with `file://` | Serve `frontend/` over HTTP (step 5) |
+| `better-sqlite3` build errors | Use Node ≥ 20; re-run `npm --prefix backend install` |
+| Out of disk during ETL | Use `--max-trips` or `create_demo_db.py` |
+
+---
+
+## Documentation
+
+Course technical write-up (problem framing, architecture, algorithm, insights, reflection):
+
+- HTML source: [`docs/technical-report.html`](docs/technical-report.html)
+- PDF: [`docs/technical-report.pdf`](docs/technical-report.pdf)

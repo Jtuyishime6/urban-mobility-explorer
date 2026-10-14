@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Urban Mobility Data Explorer — Technical Report</title>
+<style>
+  @page { size: A4; margin: 14mm 16mm; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-size: 9.5pt;
+    line-height: 1.35;
+    color: #1a1a1a;
+    margin: 0;
+    padding: 0;
+  }
+  h1 {
+    font-size: 15pt;
+    margin: 0 0 2pt;
+    letter-spacing: -0.02em;
+  }
+  .meta {
+    font-size: 8.5pt;
+    color: #444;
+    margin-bottom: 10pt;
+    border-bottom: 1.5pt solid #111;
+    padding-bottom: 6pt;
+  }
+  h2 {
+    font-size: 11pt;
+    margin: 11pt 0 4pt;
+    padding-bottom: 2pt;
+    border-bottom: 0.75pt solid #ccc;
+    page-break-after: avoid;
+  }
+  h3 {
+    font-size: 9.5pt;
+    margin: 6pt 0 2pt;
+    page-break-after: avoid;
+  }
+  p, li { margin: 0 0 3.5pt; }
+  ul { margin: 2pt 0 4pt; padding-left: 16pt; }
+  li { margin-bottom: 2pt; }
+  .two-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10pt;
+    align-items: start;
+  }
+  .arch {
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 7.5pt;
+    line-height: 1.25;
+    background: #f6f6f6;
+    border: 0.75pt solid #ccc;
+    padding: 6pt 8pt;
+    white-space: pre;
+    margin: 4pt 0 6pt;
+  }
+  .pseudo {
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 7.2pt;
+    line-height: 1.3;
+    background: #f6f6f6;
+    border: 0.75pt solid #ccc;
+    padding: 5pt 7pt;
+    margin: 3pt 0 4pt;
+    white-space: pre;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 8pt;
+    margin: 3pt 0 5pt;
+  }
+  th, td {
+    border: 0.5pt solid #bbb;
+    padding: 2.5pt 5pt;
+    text-align: left;
+  }
+  th { background: #eee; }
+  .insight {
+    border: 0.75pt solid #ddd;
+    padding: 5pt 7pt;
+    margin-bottom: 6pt;
+    page-break-inside: avoid;
+  }
+  .insight h3 { margin-top: 0; }
+  .charts {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 6pt;
+    margin: 4pt 0 6pt;
+  }
+  .chart-box {
+    border: 0.5pt solid #ccc;
+    padding: 4pt;
+    text-align: center;
+  }
+  .chart-box .caption {
+    font-size: 7.5pt;
+    color: #333;
+    margin-top: 2pt;
+  }
+  .note { font-size: 8pt; color: #444; font-style: italic; }
+  .tight { margin-bottom: 2pt; }
+  @media print {
+    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    a { color: inherit; text-decoration: none; }
+  }
+</style>
+</head>
+<body>
+
+<h1>Urban Mobility Data Explorer — Technical Report</h1>
+<p class="meta">
+  NYC TLC Yellow Taxi (January 2019) · Team documentation (2–3 pages) ·
+  Stack: Python ETL · SQLite · Express/Node API · Vanilla JS + Leaflet/Chart.js
+</p>
+
+<!-- ========== 1 ========== -->
+<h2>1. Problem Framing and Dataset Analysis</h2>
+<p>
+  We analyse <strong>NYC Taxi &amp; Limousine Commission (TLC) Yellow Taxi</strong> trip records
+  for January 2019 (~7.7M raw rows in Parquet), joined with the official taxi-zone lookup CSV and
+  zone boundary shapefile. The goal is an interactive explorer for planners and analysts: filter by
+  date/borough/zone, inspect KPIs, map hotspots, and surface mobility corridors and coverage gaps.
+</p>
+<p class="tight"><strong>Data challenges.</strong> Raw TLC data contains missing passenger counts,
+  zero/negative distances and fares, impossible speeds, trips longer than a work shift, unknown
+  LocationIDs, and exact duplicate rows. Optional fee columns are often null; older schema variants
+  omit fields entirely. Zone geometries arrive in a projected CRS and must be reprojected to WGS84
+  for Leaflet.</p>
+<p class="tight"><strong>Cleaning assumptions.</strong> Naive timestamps are treated as America/New_York
+  and stored in UTC. We keep trips only when duration ∈ (0, 4h], passengers ∈ [1, 8], distance ∈ (0, 200]
+  miles, average speed ≤ 100 mph, fare ∈ (0, 1000], total ∈ (0, 1500], and both zones exist in the
+  lookup. Missing optional fees become 0; a missing total is recomputed from components and the row
+  is flagged. Exact duplicates are detected via SHA-256 fingerprints and logged to
+  <code>data_quality_issues</code>.</p>
+<p>
+  <strong>Unexpected observation that shaped design:</strong> after cleaning, ~231k rows (~3%) were
+  excluded—dominated by passenger-count and distance violations—while Manhattan midtown/UES zones
+  still dominated volume with average speeds near ~10–11 mph, versus Queens (airport corridors) at
+  ~24 mph. That asymmetry pushed us toward a <em>zone-to-zone duration graph</em> and coverage-gap
+  ratios instead of citywide averages alone: mobility quality is highly local.
+</p>
+<p class="note">
+  Outcome of Issue 1 load: <strong>7,464,967</strong> accepted trips into SQLite;
+  <strong>231,650</strong> excluded + <strong>3</strong> flagged audit summaries.
+</p>
+
+<!-- ========== 2 ========== -->
+<h2>2. System Architecture and Design Decisions</h2>
+<div class="arch">┌──────────────────────┐     HTTP JSON (/api/*)      ┌────────────────────────────┐
+│  Frontend (static)   │  ←──────────────────────→   │  Backend (Express / Node)  │
+│  dashboard.html      │     CORS read-only GET      │  better-sqlite3 (RO)       │
+│  Leaflet map         │                             │  Dijkstra corridor module  │
+│  Chart.js panels     │                             └─────────────┬──────────────┘
+└──────────────────────┘                                           │ SQL
+                                                                   ▼
+                                                     ┌────────────────────────────┐
+                                                     │  SQLite (urban_mobility.*) │
+                                                     │  dims: boroughs, zones…    │
+                                                     │  fact: trips + quality log │
+                                                     └────────────────────────────┘
+Python ETL (etl.py)  →  cleans Parquet + zones  →  writes schema.sql database</div>
+<div class="two-col">
+  <div>
+    <p><strong>Stack justification.</strong> Python + PyArrow for columnar Parquet cleaning;
+    SQLite for a portable, zero-ops analytic store with foreign keys and indexes on
+    <code>(pickup_datetime)</code> and location columns; Express for a thin, read-only JSON API;
+    static HTML/JS so the dashboard needs no build step. Schema is star-like: dimension tables
+    (boroughs, service zones, taxi zones + GeoJSON, rate codes, payment types) and a trip fact
+    table with derived <code>duration_seconds</code>, <code>average_speed_mph</code>,
+    <code>fare_per_mile</code>.</p>
+  </div>
+  <div>
+    <p><strong>Trade-offs.</strong> Full-month SQLite is ~3 GB—great for demos of real scale but
+    heavy on laptops, so we ship a sampled demo DB (~80k trips, all zones retained). Read-only API
+    avoids accidental writes. We reject library shortest-path helpers to meet the custom-algorithm
+    requirement, accepting more code in exchange for clear DSA ownership. Serving frontend via a
+    simple static server (separate from the API) keeps concerns split but requires two processes.</p>
+  </div>
+</div>
+
+<!-- ========== 3 ========== -->
+<h2>3. Algorithmic Logic and Data Structures</h2>
+<p>
+  <strong>Problem.</strong> Given two TLC zones, find the lowest <em>expected travel-time corridor</em>
+  through observed pickup→drop-off flows (not road geometry). We manually implement
+  <strong>Dijkstra</strong> over a directed zone graph with a custom <strong>binary min-heap</strong>
+  (decrease-key via handle map)—no <code>heapq</code>, no library pathfinders, no
+  <code>Array.sort</code> for the priority queue (<code>backend/algorithms/</code>).
+</p>
+<p class="tight">Edges are aggregated from cleaned trips; weight = average duration (seconds);
+  rare edges can be filtered with <code>min_trips</code>; self-loops are dropped.</p>
+<div class="pseudo">DIJKSTRA(G, s, t):
+  dist[v] ← ∞ for all v; dist[s] ← 0; Heap H ← {(s, 0)}
+  while H not empty:
+    u ← H.POP()                     // O(log V)
+    if u settled: continue; mark u settled; if u = t: break
+    for each edge (u → v, w):
+      if dist[u] + w &lt; dist[v]:
+        dist[v] ← dist[u] + w; prev[v] ← u
+        H.DECREASE_KEY(v) or H.PUSH(v)
+  return path s ⇝ t via prev[], or NO_PATH</div>
+<table>
+  <tr><th>Component</th><th>Time</th><th>Space</th></tr>
+  <tr><td>Build adjacency list from SQL aggregates</td><td>O(E)</td><td>O(V + E)</td></tr>
+  <tr><td>Dijkstra + binary heap</td><td>O((V + E) log V)</td><td>O(V)</td></tr>
+  <tr><td>Overall (API, excl. SQL scan)</td><td>O((V + E) log V)</td><td>O(V + E)</td></tr>
+</table>
+<p class="note">
+  Exposed as <code>GET /api/routes/optimal?from=&amp;to=</code>. With ~263 TLC zones this is interactive;
+  a Fibonacci heap would improve asymptotics but obscures the teaching goal.
+</p>
+
+<!-- ========== 4 ========== -->
+<h2>4. Insights and Interpretation</h2>
+<p class="tight">
+  Insights below use the cleaned January 2019 load (and dashboard charts backed by
+  <code>/api/trips/hourly</code>, <code>/api/trips/revenue</code>, <code>/api/trips/gaps</code>).
+  Screenshots of the live dashboard can replace the schematic charts for submission if preferred.
+</p>
+
+<div class="charts">
+  <div class="chart-box">
+    <svg viewBox="0 0 220 90" width="100%" height="78" aria-label="Rush hour schematic">
+      <text x="110" y="12" text-anchor="middle" font-size="8" fill="#333">Trip volume by hour (schematic)</text>
+      <rect x="10" y="55" width="7" height="20" fill="#58a6ff"/><rect x="20" y="60" width="7" height="15" fill="#58a6ff"/>
+      <rect x="30" y="62" width="7" height="13" fill="#58a6ff"/><rect x="40" y="58" width="7" height="17" fill="#58a6ff"/>
+      <rect x="50" y="48" width="7" height="27" fill="#58a6ff"/><rect x="60" y="35" width="7" height="40" fill="#58a6ff"/>
+      <rect x="70" y="28" width="7" height="47" fill="#f0883e"/><rect x="80" y="32" width="7" height="43" fill="#58a6ff"/>
+      <rect x="90" y="38" width="7" height="37" fill="#58a6ff"/><rect x="100" y="36" width="7" height="39" fill="#58a6ff"/>
+      <rect x="110" y="34" width="7" height="41" fill="#58a6ff"/><rect x="120" y="33" width="7" height="42" fill="#58a6ff"/>
+      <rect x="130" y="30" width="7" height="45" fill="#58a6ff"/><rect x="140" y="26" width="7" height="49" fill="#58a6ff"/>
+      <rect x="150" y="22" width="7" height="53" fill="#58a6ff"/><rect x="160" y="18" width="7" height="57" fill="#f0883e"/>
+      <rect x="170" y="16" width="7" height="59" fill="#f0883e"/><rect x="180" y="20" width="7" height="55" fill="#58a6ff"/>
+      <rect x="190" y="28" width="7" height="47" fill="#58a6ff"/><rect x="200" y="40" width="7" height="35" fill="#58a6ff"/>
+      <line x1="8" y1="75" x2="212" y2="75" stroke="#999" stroke-width="0.5"/>
+    </svg>
+    <div class="caption">Fig A — Rush-hour volume (dashboard hourly chart)</div>
+  </div>
+  <div class="chart-box">
+    <svg viewBox="0 0 220 90" width="100%" height="78" aria-label="Borough speed">
+      <text x="110" y="12" text-anchor="middle" font-size="8" fill="#333">Avg mobility speed by borough</text>
+      <rect x="20" y="48" width="28" height="27" fill="#58a6ff"/><text x="34" y="84" text-anchor="middle" font-size="6">Manh ~10.9</text>
+      <rect x="60" y="42" width="28" height="33" fill="#58a6ff"/><text x="74" y="84" text-anchor="middle" font-size="6">Bklyn ~13.8</text>
+      <rect x="100" y="32" width="28" height="43" fill="#58a6ff"/><text x="114" y="84" text-anchor="middle" font-size="6">Bronx ~17.9</text>
+      <rect x="140" y="20" width="28" height="55" fill="#f0883e"/><text x="154" y="84" text-anchor="middle" font-size="6">Queens ~24.3</text>
+      <rect x="180" y="28" width="28" height="47" fill="#58a6ff"/><text x="194" y="84" text-anchor="middle" font-size="6">SI ~19.6</text>
+      <line x1="15" y1="75" x2="210" y2="75" stroke="#999" stroke-width="0.5"/>
+    </svg>
+    <div class="caption">Fig B — Borough speed contrast (API /trips/revenue)</div>
+  </div>
+  <div class="chart-box">
+    <svg viewBox="0 0 220 90" width="100%" height="78" aria-label="Top zones">
+      <text x="110" y="12" text-anchor="middle" font-size="8" fill="#333">Top pickup zones (demo sample)</text>
+      <rect x="55" y="22" width="150" height="10" fill="#f0883e"/><text x="50" y="30" text-anchor="end" font-size="6">UES South</text>
+      <rect x="55" y="36" width="142" height="10" fill="#58a6ff"/><text x="50" y="44" text-anchor="end" font-size="6">UES North</text>
+      <rect x="55" y="50" width="135" height="10" fill="#58a6ff"/><text x="50" y="58" text-anchor="end" font-size="6">Midtown C</text>
+      <rect x="55" y="64" width="120" height="10" fill="#58a6ff"/><text x="50" y="72" text-anchor="end" font-size="6">Midtown E</text>
+      <text x="110" y="88" text-anchor="middle" font-size="6" fill="#555">Manhattan core dominates demand</text>
+    </svg>
+    <div class="caption">Fig C — Hotspot ranking (summary topZones)</div>
+  </div>
+</div>
+
+<div class="insight">
+  <h3>Insight 1 — Evening peak is the binding congestion period</h3>
+  <p>
+    <strong>Derived via:</strong> <code>GET /api/trips/hourly</code> and the Rush Hour chart (Fig A).
+    Trip volume rises through the afternoon and peaks in the early evening, while average speed falls
+    in the same window.
+    <strong>Urban meaning:</strong> yellow-cab demand and street congestion co-peak after the workday;
+    interventions (curb management, bus lanes, dynamic pricing) should target the evening shoulder,
+    not only the morning commute.
+  </p>
+</div>
+<div class="insight">
+  <h3>Insight 2 — Outer-borough / airport corridors move ~2× faster than Manhattan</h3>
+  <p>
+    <strong>Derived via:</strong> borough aggregates (<code>/api/trips/revenue</code> / Fig B) and zone
+    stats: Manhattan ~10.9 mph vs Queens ~24.3 mph (airport-heavy flows). Dijkstra corridors to/from
+    airport-linked zones often show long geographic hops but competitive expected duration.
+    <strong>Urban meaning:</strong> “slow city” is a Manhattan phenomenon; citywide averages hide a
+    dual network—dense short hops vs longer, faster airport and outer-borough legs.
+  </p>
+</div>
+<div class="insight">
+  <h3>Insight 3 — Demand concentrates in a few Midtown/UES zones; gaps appear at edges</h3>
+  <p>
+    <strong>Derived via:</strong> sorted top zones (Fig C) and <code>GET /api/trips/gaps</code>
+    (pickup/drop-off coverage ratio outside ~0.6–1.8). Upper East Side and Midtown lead pickups;
+    several outer zones show strong imbalance (many drop-offs relative to pickups or vice versa).
+    <strong>Urban meaning:</strong> fleet positioning and empty-mile risk are geographic: surplus
+    drop-offs without matching pickups imply deadheading. Planners can use gap ratios to prioritize
+    underserved neighborhoods or repositioning incentives.
+  </p>
+</div>
+
+<!-- ========== 5 ========== -->
+<h2>5. Reflection and Future Work</h2>
+<p>
+  <strong>Challenges.</strong> Full Parquet loads are I/O and disk heavy; timezone-correct New York
+  calendar filters (including DST) required careful UTC boundary conversion; keeping the custom heap
+  correct under decrease-key was the main DSA risk; coordinating ETL schema with API SQL and Leaflet
+  GeoJSON required a single source of truth in <code>schema.sql</code>.
+</p>
+<p>
+  <strong>If this were a product:</strong> move to Postgres/PostGIS or a columnar warehouse for
+  multi-month scale; add authentication and cached aggregates; overlay OSM road networks so corridors
+  become navigable paths; stream near-real-time TLC feeds; and A/B-test fleet repositioning using gap
+  scores. On the UX side, bake the Dijkstra corridor into the map as a first-class layer and export
+  planner-ready PDF briefs from <code>/api/report</code>.
+</p>
+
+</body>
+</html>

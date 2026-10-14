@@ -1,5 +1,13 @@
 # Urban Mobility Data Explorer
 
+## 📌 Deliverables & Project Links
+
+- **Team Participation Sheet:** [Urban Mobility Analytics - Team Sheet](https://docs.google.com/spreadsheets/d/170hJX_mlW1NxFpZ7_HElOrk321vrqa3xFlHXSUc20IA/edit?usp=sharing)
+- **Video Walkthrough (5-Minute Demo):** _[Insert Video Link Here]_
+- **Database Schema:** [`database/schema.sql`](database/schema.sql)
+- **Algorithm Analysis:** [`backend/algorithms/ALGORITHM.md`](backend/algorithms/ALGORITHM.md)
+- **CodeVibe Integrity Reports:** [`codevibe-reports/`](codevibe-reports/)
+
 ## Issue 1: Data cleaning and database setup
 
 The Issue 1 pipeline loads a NYC TLC Yellow Taxi Parquet file together with the

@@ -203,8 +203,29 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // Distance intervals in miles
             const distanceBuckets = ['0-2 mi', '2-5 mi', '5-10 mi', '10-15 mi', '15-20 mi', '20+ mi'];
-            const avgFares = [9.50, 16.20, 28.50, 44.00, 58.70, 76.50];
-            const tripCounts = [320000, 240000, 115000, 48000, 16000, 5200];
+            let avgFares;
+            let tripCounts;
+            try {
+                const startDate = startDateInput ? startDateInput.value : '';
+                const endDate = endDateInput ? endDateInput.value : '';
+                const borough = boroughFilter ? boroughFilter.value : 'all';
+                const url = new URL(`${API_BASE}/trips/fare-distance`);
+                if (startDate) url.searchParams.append('start_date', startDate);
+                if (endDate) url.searchParams.append('end_date', endDate);
+                if (borough !== 'all') url.searchParams.append('borough', borough);
+                if (window.activeZoneId) url.searchParams.append('zone_id', window.activeZoneId);
+
+                const response = await fetch(url);
+                if (!response.ok) throw new Error(`API Error: ${response.status}`);
+                const groups = await response.json();
+                const byBucket = new Map(groups.map(group => [group.bucket, group]));
+                avgFares = distanceBuckets.map(bucket => byBucket.get(bucket)?.avgFare || 0);
+                tripCounts = distanceBuckets.map(bucket => byBucket.get(bucket)?.trips || 0);
+            } catch (error) {
+                console.warn('Backend fare-distance endpoint unavailable, using fallback chart data:', error.message);
+                avgFares = [9.50, 16.20, 28.50, 44.00, 58.70, 76.50];
+                tripCounts = [320000, 240000, 115000, 48000, 16000, 5200];
+            }
 
             new Chart(ctx, {
                 type: 'bar',
